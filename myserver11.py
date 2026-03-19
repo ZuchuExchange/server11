@@ -1,18 +1,21 @@
 import os
-import json
+import logging
 import traceback
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)
 
-# Payment gateway details
-PAYMENT_URL = 'https://backend.payhero.co.ke/api/v2/payments'
-REFERENCE_STATUS_URL = 'https://backend.payhero.co.ke/api/v2/transaction-status'
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
+# Load environment variables
+PAYMENT_URL = os.getenv('PAYMENT_URL', 'https://backend.payhero.co.ke/api/v2/payments')
+REFERENCE_STATUS_URL = os.getenv('REFERENCE_STATUS_URL', 'https://backend.payhero.co.ke/api/v2/transaction-status')
 AUTH_HEADER = {
-    'Authorization': 'Basic RVJKbWpSTDRYbTUyUlVLWVpEN3k6eHFYV3ZwdkZTVlpYVm9yYmMyTUxoZWJJOE50OTFxTFg3WDhjcXlKOQ== ',
+    'Authorization': os.getenv('AUTH_HEADER'),
     'Content-Type': 'application/json',
 }
 
@@ -20,7 +23,7 @@ AUTH_HEADER = {
 def pay():
     try:
         data = request.get_json()
-        print("Received payment request:", data)
+        app.logger.info("Received payment request: %s", data)
 
         amount = data.get('amount')
         phone_number = data.get('phone_number')
@@ -28,7 +31,6 @@ def pay():
         if not amount or not phone_number:
             return jsonify({'error': 'Missing amount or phone_number'}), 400
 
-        # Prepare payload for payment gateway
         payload = {
             "amount": amount,
             "phone_number": phone_number,
@@ -36,32 +38,25 @@ def pay():
             "provider": "m-pesa",
             "external_reference": "INV-009",
             "customer_name": "Customer",
-            "callback_url": "https://196.96.187.69:5000/callback"  # Replace with your actual URL
+            "callback_url": os.getenv('CALLBACK_URL')  # Use env variable
         }
 
         response = requests.post(PAYMENT_URL, json=payload, headers=AUTH_HEADER)
         response.raise_for_status()
         resp_json = response.json()
-        print("Payment gateway response:", resp_json)
+        app.logger.info("Payment gateway response: %s", resp_json)
 
         return jsonify(resp_json)
 
     except requests.exceptions.HTTPError as e:
-        print("HTTPError:", e)
-        return jsonify({
-            'error': str(e),
-            'response': e.response.text
-        }), 500
+        app.logger.error("HTTPError: %s", e)
+        return jsonify({'error': str(e), 'response': e.response.text}), 500
     except requests.exceptions.RequestException as e:
-        print("RequestException:", e)
+        app.logger.error("RequestException: %s", e)
         return jsonify({'error': str(e)}), 500
     except Exception as e:
-        print("Unhandled exception:", e)
-        traceback.print_exc()
-        return jsonify({
-            'error': 'Internal server error',
-            'details': str(e)
-        }), 500
+        app.logger.exception("Unhandled exception")
+        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
 @app.route('/reference_status', methods=['GET'])
 def reference_status():
@@ -69,29 +64,20 @@ def reference_status():
     if not reference_id:
         return jsonify({'error': 'Missing reference parameter in URL'}), 400
     try:
-        # Build the URL with the reference_id
         url = f"{REFERENCE_STATUS_URL}?reference={reference_id}"
         response = requests.get(url, headers=AUTH_HEADER)
         response.raise_for_status()
-        # Return the response directly
         return jsonify(response.json())
     except requests.exceptions.HTTPError as e:
-        print("HTTPError:", e)
-        return jsonify({
-            'error': str(e),
-            'response': e.response.text
-        }), 500
+        app.logger.error("HTTPError: %s", e)
+        return jsonify({'error': str(e), 'response': e.response.text}), 500
     except requests.exceptions.RequestException as e:
-        print("RequestException:", e)
+        app.logger.error("RequestException: %s", e)
         return jsonify({'error': str(e)}), 500
     except Exception as e:
-        print("Unhandled exception:", e)
-        traceback.print_exc()
-        return jsonify({
-            'error': 'Internal server error',
-            'details': str(e)
-        }), 500
+        app.logger.exception("Unhandled exception")
+        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
 
 if __name__ == '__main__':
-    # Run Flask app on port 5000
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
